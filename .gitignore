@@ -1,0 +1,18 @@
+# Build outputs
+build/
+*.o
+*.app
+*.appex
+*.dSYM
+.git_repo/
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Backups
+*.bak
+*~

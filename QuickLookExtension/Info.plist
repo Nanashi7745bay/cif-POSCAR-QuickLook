@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Crystal QuickLook Preview</string>
+	<key>CFBundleExecutable</key>
+	<string>CrystalQuickLookPreview</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.crystalquicklook.preview</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>CrystalQuickLookPreview</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>2</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>QLSupportedContentTypes</key>
+			<array>
+				<string>com.crystallography.cif</string>
+				<string>com.vasp.poscar</string>
+				<string>public.cif-file</string>
+				<string>dyn.ah62d4rv4ge804550</string>
+			</array>
+			<key>QLSupportsSearchableItems</key>
+			<false/>
+			<key>QLPreviewModalWidth</key>
+			<integer>800</integer>
+			<key>QLPreviewModalHeight</key>
+			<integer>600</integer>
+		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.quicklook.preview</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>PreviewViewController</string>
+	</dict>
+</dict>
+</plist>
