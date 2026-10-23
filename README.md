@@ -4,6 +4,9 @@ macOSのFinder上で、**CIFファイル**（Crystallographic Information File�
 
 VESTAやOvito等の重いGUIソフトを起動することなく、ファイルの構造、単位格子、格子定数、化学式を爆速で確認できます。
 
+**Important Notice!!!**
+このレポジトリは生成AI機能(Antigravity)によって書かれています。誤りがある可能性があり、加えて苦手な方は利用を控えてください。
+
 ---
 
 ## 🎨 v1.1 新機能: 着せ替えテーマ機能 (Render Styles)
