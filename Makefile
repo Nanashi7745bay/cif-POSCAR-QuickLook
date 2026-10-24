@@ -4,7 +4,7 @@ CC = clang
 ARCH = arm64
 MIN_MACOS = 12.0
 CFLAGS = -fobjc-arc -target $(ARCH)-apple-macos$(MIN_MACOS) -O2
-SHARED_SRCS = Shared/ElementData.m Shared/CrystalModel.m Shared/CIFParser.m Shared/POSCARParser.m Shared/CrystalSceneBuilder.m Shared/CrystalViewController.m
+SHARED_SRCS = Shared/ElementData.m Shared/CrystalModel.m Shared/CIFParser.m Shared/POSCARParser.m Shared/CrystalSceneBuilder.m Shared/CrystalCompassNode.m Shared/CrystalViewController.m
 SHARED_INCS = -I Shared
 
 BUILD_DIR = build
@@ -40,7 +40,7 @@ app: extension
 	@mkdir -p $(APP_BUNDLE)/Contents/PlugIns
 	$(CC) $(CFLAGS) $(SHARED_INCS) -I App \
 		-framework Foundation -framework AppKit -framework SceneKit \
-		$(SHARED_SRCS) App/MainWindowController.m App/AppDelegate.m App/main.m \
+		$(SHARED_SRCS) App/PreferencesWindowController.m App/MainWindowController.m App/AppDelegate.m App/main.m \
 		-o $(APP_BUNDLE)/Contents/MacOS/CrystalQuickLook
 	@cp App/Info.plist $(APP_BUNDLE)/Contents/
 	@if [ -f AppIcon.icns ]; then cp AppIcon.icns $(APP_BUNDLE)/Contents/Resources/; fi

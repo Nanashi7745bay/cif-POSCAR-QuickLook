@@ -312,4 +312,29 @@ static NSInteger gcd(NSInteger a, NSInteger b) {
     return str;
 }
 
+- (NSInteger)longestAxisIndex {
+    if (_a >= _b && _a >= _c) return 0;
+    if (_b >= _a && _b >= _c) return 1;
+    return 2;
+}
+
+- (NSString *)longestAxisName {
+    NSInteger idx = [self longestAxisIndex];
+    if (idx == 0) return @"a";
+    if (idx == 1) return @"b";
+    return @"c";
+}
+
+- (SCNVector3)eulerAnglesForDepthAxis:(NSInteger)axisIndex {
+    switch (axisIndex) {
+        case 0: // a-axis into depth
+            return SCNVector3Make(-M_PI / 10.0, -M_PI / 2.0 + M_PI / 9.0, 0);
+        case 1: // b-axis into depth
+            return SCNVector3Make(M_PI / 2.0 - M_PI / 9.0, 0, M_PI / 10.0);
+        case 2: // c-axis into depth
+        default:
+            return SCNVector3Make(-M_PI / 9.0, M_PI / 8.0, 0);
+    }
+}
+
 @end

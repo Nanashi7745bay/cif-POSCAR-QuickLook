@@ -92,6 +92,9 @@ static inline double Vector3DLength(Vector3D v) {
 - (NSString *)formattedFormula;
 - (NSString *)summaryText;
 - (Vector3D)unitCellCenter;
+- (NSInteger)longestAxisIndex; // 0 for a, 1 for b, 2 for c
+- (NSString *)longestAxisName;
+- (SCNVector3)eulerAnglesForDepthAxis:(NSInteger)axisIndex;
 
 // Transformations
 - (void)calculateVectorsFromParameters;

@@ -4,9 +4,12 @@
 //
 
 #import "CrystalViewController.h"
+#import "CrystalCompassNode.h"
 #import "CIFParser.h"
 #import "POSCARParser.h"
 
+NSString * const kInitialOrientationModeKey = @"CrystalInitialOrientationMode";
+NSString * const kSpecifiedDepthAxisKey = @"CrystalSpecifiedDepthAxis";
 static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 
 @interface KeyHandlingSCNView : SCNView
@@ -58,6 +61,7 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 @property (nonatomic, strong) NSSegmentedControl *styleControl;
 @property (nonatomic, strong) NSStackView *buttonStack;
 @property (nonatomic, strong) CrystalModel *model;
+@property (nonatomic, strong) CrystalCompassNode *compassNode;
 @property (nonatomic, assign) double initialCameraDistance;
 
 @end
@@ -67,11 +71,28 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 - (instancetype)init {
     self = [super init];
     if (self) {
-        NSInteger savedStyle = [[NSUserDefaults standardUserDefaults] integerForKey:kSavedRenderStyleKey];
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
+        // Render Style
+        NSInteger savedStyle = [defaults integerForKey:kSavedRenderStyleKey];
         if (savedStyle >= 0 && savedStyle <= 2) {
             _currentStyle = (CrystalRenderStyle)savedStyle;
         } else {
             _currentStyle = CrystalRenderStyleStudio;
+        }
+
+        // Orientation Mode (Default is LongestAxisDepth = 0)
+        if ([defaults objectForKey:kInitialOrientationModeKey] == nil) {
+            _orientationMode = InitialOrientationModeLongestAxisDepth;
+        } else {
+            _orientationMode = (InitialOrientationMode)[defaults integerForKey:kInitialOrientationModeKey];
+        }
+
+        // Specified Depth Axis (Default is C = 2)
+        if ([defaults objectForKey:kSpecifiedDepthAxisKey] == nil) {
+            _specifiedAxis = SpecifiedDepthAxisC;
+        } else {
+            _specifiedAxis = (SpecifiedDepthAxis)[defaults integerForKey:kSpecifiedDepthAxisKey];
         }
     }
     return self;
@@ -84,6 +105,7 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     // 1. SceneKit 3D View with Key handling
     _scnView = [[KeyHandlingSCNView alloc] initWithFrame:self.view.bounds];
     _scnView.controller = self;
+    _scnView.delegate = self;
     _scnView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _scnView.allowsCameraControl = YES;
     _scnView.autoenablesDefaultLighting = NO;
@@ -150,13 +172,11 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 
 - (void)updateHUDTheme {
     if (_currentStyle == CrystalRenderStyleFlat) {
-        // Light themed HUD for White background
         _hudView.material = NSVisualEffectMaterialSheet;
         _hudView.layer.borderColor = [NSColor colorWithWhite:0.0 alpha:0.15].CGColor;
         _titleLabel.textColor = [NSColor colorWithWhite:0.1 alpha:1.0];
         _infoLabel.textColor = [NSColor colorWithWhite:0.25 alpha:1.0];
     } else {
-        // Dark themed HUD for Studio / VESTA
         _hudView.material = NSVisualEffectMaterialHUDWindow;
         _hudView.layer.borderColor = [NSColor colorWithWhite:1.0 alpha:0.15].CGColor;
         _titleLabel.textColor = [NSColor whiteColor];
@@ -176,13 +196,14 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     [self updateHUDTheme];
 
     if (_model) {
-        // Save current orientation before rebuilding scene
         SCNNode *oldStructure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
-        SCNVector3 currentAngles = oldStructure ? oldStructure.eulerAngles : SCNVector3Make(-M_PI / 6.0, M_PI / 5.0, 0);
+        SCNVector3 currentAngles = oldStructure ? oldStructure.eulerAngles : [self initialEulerAngles];
 
         double camDist = _initialCameraDistance;
         SCNScene *scene = [CrystalSceneBuilder buildSceneForModel:_model style:_currentStyle cameraDistance:&camDist];
         _scnView.scene = scene;
+
+        [self attachCompassToScene:scene];
 
         SCNNode *newStructure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
         if (newStructure) {
@@ -194,6 +215,61 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 - (void)cycleNextStyle {
     CrystalRenderStyle next = (_currentStyle + 1) % 3;
     [self setRenderStyle:next];
+}
+
+- (void)setOrientationMode:(InitialOrientationMode)mode {
+    _orientationMode = mode;
+    [[NSUserDefaults standardUserDefaults] setInteger:mode forKey:kInitialOrientationModeKey];
+    [self updateInfoText];
+}
+
+- (void)setSpecifiedAxis:(SpecifiedDepthAxis)axis {
+    _specifiedAxis = axis;
+    [[NSUserDefaults standardUserDefaults] setInteger:axis forKey:kSpecifiedDepthAxisKey];
+    [self updateInfoText];
+}
+
+- (SCNVector3)initialEulerAngles {
+    if (!_model) {
+        return SCNVector3Make(-M_PI / 6.0, M_PI / 5.0, 0);
+    }
+
+    switch (_orientationMode) {
+        case InitialOrientationModeLongestAxisDepth: {
+            NSInteger longest = [_model longestAxisIndex];
+            return [_model eulerAnglesForDepthAxis:longest];
+        }
+        case InitialOrientationModeSpecifiedAxis: {
+            return [_model eulerAnglesForDepthAxis:(NSInteger)_specifiedAxis];
+        }
+        case InitialOrientationModeClassicIsometric:
+        default: {
+            return SCNVector3Make(-M_PI / 6.0, M_PI / 5.0, 0);
+        }
+    }
+}
+
+- (void)attachCompassToScene:(SCNScene *)scene {
+    if (!_model) return;
+
+    SCNNode *cameraNode = [scene.rootNode childNodeWithName:@"MainCameraNode" recursively:YES];
+    if (!cameraNode) return;
+
+    _compassNode = [CrystalCompassNode compassWithModel:_model style:_currentStyle];
+    _compassNode.name = @"OrientationCompassNode";
+
+    // Place compass in front-left of camera
+    // Distance from camera: 2.0
+    // At FOV ~ 42 deg, half-height is 2.0 * tan(21 deg) ~= 0.768
+    // With 4:3 aspect ratio, half-width ~= 1.02
+    CGFloat compDist = 2.0;
+    CGFloat fovRad = 42.0 * M_PI / 180.0;
+    CGFloat halfH = compDist * tan(fovRad * 0.5);
+    CGFloat aspect = (self.view.bounds.size.height > 0) ? (self.view.bounds.size.width / self.view.bounds.size.height) : (4.0 / 3.0);
+    CGFloat halfW = halfH * aspect;
+
+    _compassNode.position = SCNVector3Make(-halfW + 0.35, -halfH + 0.35, -compDist);
+    [cameraNode addChildNode:_compassNode];
 }
 
 - (BOOL)loadStructureFromURL:(NSURL *)url error:(NSError * _Nullable *)error {
@@ -253,21 +329,42 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     _initialCameraDistance = camDist;
     _scnView.scene = scene;
 
-    // Update HUD Text
+    [self attachCompassToScene:scene];
+
+    // Update HUD
     _titleLabel.stringValue = [NSString stringWithFormat:@"%@  (%@)", [model formattedFormula], model.sourceFormat];
+    [self updateInfoText];
+
+    [self resetCamera];
+}
+
+- (void)updateInfoText {
+    if (!_model) return;
 
     NSMutableString *info = [NSMutableString string];
-    if (model.spaceGroup.length > 0) {
-        [info appendFormat:@"SG: %@\n", model.spaceGroup];
+    if (_model.spaceGroup.length > 0) {
+        [info appendFormat:@"SG: %@\n", _model.spaceGroup];
     }
-    [info appendFormat:@"a=%.3f b=%.3f c=%.3f Å\n", model.a, model.b, model.c];
-    [info appendFormat:@"α=%.1f° β=%.1f° γ=%.1f°\n", model.alpha, model.beta, model.gamma];
-    [info appendFormat:@"Vol: %.2f Å³\n", model.volume];
+    [info appendFormat:@"a=%.3f b=%.3f c=%.3f Å\n", _model.a, _model.b, _model.c];
+    [info appendFormat:@"α=%.1f° β=%.1f° γ=%.1f°\n", _model.alpha, _model.beta, _model.gamma];
+    [info appendFormat:@"Vol: %.2f Å³\n", _model.volume];
 
-    // Element breakdown
+    // Depth orientation info
+    NSString *depthStr = @"";
+    if (_orientationMode == InitialOrientationModeLongestAxisDepth) {
+        depthStr = [NSString stringWithFormat:@"Depth: Longest (%@-axis)", [_model longestAxisName]];
+    } else if (_orientationMode == InitialOrientationModeSpecifiedAxis) {
+        NSString *axName = (_specifiedAxis == SpecifiedDepthAxisA) ? @"a" : (_specifiedAxis == SpecifiedDepthAxisB ? @"b" : @"c");
+        depthStr = [NSString stringWithFormat:@"Depth: Specified (%@-axis)", axName];
+    } else {
+        depthStr = @"Depth: Classic Angle";
+    }
+    [info appendFormat:@"%@\n", depthStr];
+
+    // Atoms summary
     NSMutableDictionary<NSString *, NSNumber *> *elemCounts = [NSMutableDictionary dictionary];
     NSUInteger totalBase = 0;
-    for (CrystalAtom *a in model.atoms) {
+    for (CrystalAtom *a in _model.atoms) {
         if (!a.isPeriodicReplica) {
             totalBase++;
             elemCounts[a.symbol] = @(elemCounts[a.symbol].integerValue + 1);
@@ -278,12 +375,19 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     for (NSString *sym in [elemCounts.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
         [elemSummary addObject:[NSString stringWithFormat:@"%@:%@", sym, elemCounts[sym]]];
     }
-    [info appendFormat:@"Atoms: %lu (%@)\n", (unsigned long)totalBase, [elemSummary componentsJoinedByString:@" "]];
-    [info appendFormat:@"Bonds: %lu", (unsigned long)model.bonds.count];
+    [info appendFormat:@"Atoms: %lu (%@)", (unsigned long)totalBase, [elemSummary componentsJoinedByString:@" "]];
 
     _infoLabel.stringValue = info;
+}
 
-    [self resetCamera];
+#pragma mark - SCNSceneRendererDelegate (Sync Compass Rotation)
+
+- (void)renderer:(id<SCNSceneRenderer>)renderer updateAtTime:(NSTimeInterval)time {
+    SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
+    if (structure && _compassNode) {
+        SCNVector3 angles = structure.presentationNode.eulerAngles;
+        [_compassNode syncRotationWithStructureEulerAngles:angles];
+    }
 }
 
 #pragma mark - View Orientations
@@ -292,9 +396,11 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
     if (!structure) return;
 
+    SCNVector3 targetAngles = [self initialEulerAngles];
+
     [SCNTransaction begin];
     [SCNTransaction setAnimationDuration:0.4];
-    structure.eulerAngles = SCNVector3Make(-M_PI / 6.0, M_PI / 5.0, 0);
+    structure.eulerAngles = targetAngles;
     [SCNTransaction commit];
 }
 

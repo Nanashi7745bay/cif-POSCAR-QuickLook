@@ -4,11 +4,17 @@
 //
 
 #import "AppDelegate.h"
+#import "PreferencesWindowController.h"
 
 @implementation AppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     [self setupMenu];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(orientationSettingsChanged:)
+                                                 name:@"CrystalOrientationSettingsDidChange"
+                                               object:nil];
 
     _mainWindowController = [[MainWindowController alloc] init];
     [_mainWindowController showWindow:nil];
@@ -22,6 +28,18 @@
             NSURL *url = [NSURL fileURLWithPath:path];
             [_mainWindowController openFileURL:url];
         }
+    }
+}
+
+- (void)orientationSettingsChanged:(NSNotification *)note {
+    if (_mainWindowController && _mainWindowController.crystalVC) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        InitialOrientationMode mode = (InitialOrientationMode)[defaults integerForKey:kInitialOrientationModeKey];
+        SpecifiedDepthAxis axis = (SpecifiedDepthAxis)[defaults integerForKey:kSpecifiedDepthAxisKey];
+
+        [_mainWindowController.crystalVC setOrientationMode:mode];
+        [_mainWindowController.crystalVC setSpecifiedAxis:axis];
+        [_mainWindowController.crystalVC resetCamera];
     }
 }
 
@@ -47,6 +65,8 @@
     NSMenuItem *appMenuItem = [[NSMenuItem alloc] init];
     NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"CrystalQuickLook"];
     [appMenu addItemWithTitle:@"About CrystalQuickLook" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    [appMenu addItemWithTitle:@"Settings..." action:@selector(openPreferences:) keyEquivalent:@","];
     [appMenu addItem:[NSMenuItem separatorItem]];
     [appMenu addItemWithTitle:@"Register QuickLook Extension" action:@selector(registerQuickLook:) keyEquivalent:@""];
     [appMenu addItem:[NSMenuItem separatorItem]];
@@ -116,6 +136,12 @@
 
 - (void)selectVESTAStyle:(id)sender {
     [self.mainWindowController.crystalVC setRenderStyle:CrystalRenderStyleVESTA];
+}
+
+- (void)openPreferences:(id)sender {
+    [[PreferencesWindowController sharedController] showWindow:nil];
+    [[PreferencesWindowController sharedController].window makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
 }
 
 - (void)selectFlatStyle:(id)sender {
