@@ -325,15 +325,63 @@ static NSInteger gcd(NSInteger a, NSInteger b) {
     return @"c";
 }
 
+static SCNMatrix4 alignmentMatrixForVectors(Vector3D targetDepth, Vector3D targetHoriz) {
+    // w = unit vector along targetDepth -> mapped to +Z (0, 0, 1)
+    Vector3D w = Vector3DNormalize(targetDepth);
+    if (Vector3DLength(w) < 1e-8) {
+        return SCNMatrix4Identity;
+    }
+
+    // Orthogonalize targetHoriz against w -> mapped to +X (1, 0, 0)
+    double proj = Vector3DDot(targetHoriz, w);
+    Vector3D uRaw = Vector3DSub(targetHoriz, Vector3DScale(w, proj));
+    if (Vector3DLength(uRaw) < 1e-6) {
+        Vector3D fallback = (fabs(w.x) < 0.9) ? Vector3DMake(1, 0, 0) : Vector3DMake(0, 1, 0);
+        proj = Vector3DDot(fallback, w);
+        uRaw = Vector3DSub(fallback, Vector3DScale(w, proj));
+    }
+    Vector3D u = Vector3DNormalize(uRaw);
+
+    // v = w x u -> mapped to +Y (0, 1, 0) for right-handed basis (u, v, w)
+    Vector3D v = Vector3DCross(w, u);
+
+    SCNMatrix4 m = SCNMatrix4Identity;
+    // Row-vector convention in SceneKit: p' = p * M
+    // Column 1 = image of X, Column 2 = image of Y, Column 3 = image of Z
+    m.m11 = u.x; m.m12 = v.x; m.m13 = w.x; m.m14 = 0.0;
+    m.m21 = u.y; m.m22 = v.y; m.m23 = w.y; m.m24 = 0.0;
+    m.m31 = u.z; m.m32 = v.z; m.m33 = w.z; m.m34 = 0.0;
+    m.m41 = 0.0; m.m42 = 0.0; m.m43 = 0.0; m.m44 = 1.0;
+    return m;
+}
+
+- (SCNMatrix4)transformForDepthAxis:(NSInteger)axisIndex {
+    switch (axisIndex) {
+        case 0: // a-axis straight along depth (+Z), b-axis horizontal (+X), c-axis vertical (+Y)
+            return alignmentMatrixForVectors(_vectorA, _vectorB);
+        case 1: // b-axis straight along depth (+Z), c-axis horizontal (+X), a-axis vertical (+Y)
+            return alignmentMatrixForVectors(_vectorB, _vectorC);
+        case 2: // c-axis straight along depth (+Z), a-axis horizontal (+X), b-axis vertical (+Y)
+        default:
+            return alignmentMatrixForVectors(_vectorC, _vectorA);
+    }
+}
+
+- (SCNMatrix4)classicIsometricTransform {
+    SCNMatrix4 rotY = SCNMatrix4MakeRotation(M_PI / 5.0, 0, 1, 0);
+    SCNMatrix4 rotX = SCNMatrix4MakeRotation(-M_PI / 6.0, 1, 0, 0);
+    return SCNMatrix4Mult(rotY, rotX);
+}
+
 - (SCNVector3)eulerAnglesForDepthAxis:(NSInteger)axisIndex {
     switch (axisIndex) {
         case 0: // a-axis into depth
-            return SCNVector3Make(-M_PI / 10.0, -M_PI / 2.0 + M_PI / 9.0, 0);
+            return SCNVector3Make(0, -M_PI / 2.0, -M_PI / 2.0);
         case 1: // b-axis into depth
-            return SCNVector3Make(M_PI / 2.0 - M_PI / 9.0, 0, M_PI / 10.0);
+            return SCNVector3Make(M_PI / 2.0, M_PI / 2.0, 0);
         case 2: // c-axis into depth
         default:
-            return SCNVector3Make(-M_PI / 9.0, M_PI / 8.0, 0);
+            return SCNVector3Make(0, 0, 0);
     }
 }
 

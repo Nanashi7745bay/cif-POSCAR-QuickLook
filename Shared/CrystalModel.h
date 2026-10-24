@@ -37,6 +37,18 @@ static inline double Vector3DLength(Vector3D v) {
     return sqrt(Vector3DDot(v, v));
 }
 
+static inline Vector3D Vector3DCross(Vector3D a, Vector3D b) {
+    return Vector3DMake(a.y * b.z - a.z * b.y,
+                        a.z * b.x - a.x * b.z,
+                        a.x * b.y - a.y * b.x);
+}
+
+static inline Vector3D Vector3DNormalize(Vector3D v) {
+    double len = Vector3DLength(v);
+    if (len < 1e-12) return Vector3DMake(0, 0, 0);
+    return Vector3DScale(v, 1.0 / len);
+}
+
 @interface CrystalAtom : NSObject <NSCopying>
 
 @property (nonatomic, copy) NSString *symbol;
@@ -95,6 +107,8 @@ static inline double Vector3DLength(Vector3D v) {
 - (NSInteger)longestAxisIndex; // 0 for a, 1 for b, 2 for c
 - (NSString *)longestAxisName;
 - (SCNVector3)eulerAnglesForDepthAxis:(NSInteger)axisIndex;
+- (SCNMatrix4)transformForDepthAxis:(NSInteger)axisIndex;
+- (SCNMatrix4)classicIsometricTransform;
 
 // Transformations
 - (void)calculateVectorsFromParameters;

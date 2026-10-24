@@ -22,14 +22,78 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 }
 @end
 
+@interface CrystalViewController ()
+- (void)rotateByDeltaX:(CGFloat)dx deltaY:(CGFloat)dy;
+- (void)panByDeltaX:(CGFloat)dx deltaY:(CGFloat)dy;
+- (void)zoomByFactor:(CGFloat)factor;
+@end
+
 @interface KeyHandlingSCNView : SCNView
 @property (nonatomic, weak) CrystalViewController *controller;
+@property (nonatomic, assign) NSPoint lastDragLocation;
 @end
 
 @implementation KeyHandlingSCNView
 
 - (BOOL)acceptsFirstResponder {
     return YES;
+}
+
+- (void)mouseDown:(NSEvent *)event {
+    _lastDragLocation = [self convertPoint:event.locationInWindow fromView:nil];
+    [self.window makeFirstResponder:self];
+}
+
+- (void)mouseDragged:(NSEvent *)event {
+    NSPoint cur = [self convertPoint:event.locationInWindow fromView:nil];
+    CGFloat dx = cur.x - _lastDragLocation.x;
+    CGFloat dy = cur.y - _lastDragLocation.y;
+    _lastDragLocation = cur;
+
+    if ((event.modifierFlags & NSEventModifierFlagShift) || (event.modifierFlags & NSEventModifierFlagOption)) {
+        [_controller panByDeltaX:dx deltaY:dy];
+    } else {
+        [_controller rotateByDeltaX:dx deltaY:dy];
+    }
+}
+
+- (void)rightMouseDown:(NSEvent *)event {
+    _lastDragLocation = [self convertPoint:event.locationInWindow fromView:nil];
+}
+
+- (void)rightMouseDragged:(NSEvent *)event {
+    NSPoint cur = [self convertPoint:event.locationInWindow fromView:nil];
+    CGFloat dx = cur.x - _lastDragLocation.x;
+    CGFloat dy = cur.y - _lastDragLocation.y;
+    _lastDragLocation = cur;
+    [_controller panByDeltaX:dx deltaY:dy];
+}
+
+- (void)otherMouseDown:(NSEvent *)event {
+    _lastDragLocation = [self convertPoint:event.locationInWindow fromView:nil];
+}
+
+- (void)otherMouseDragged:(NSEvent *)event {
+    NSPoint cur = [self convertPoint:event.locationInWindow fromView:nil];
+    CGFloat dx = cur.x - _lastDragLocation.x;
+    CGFloat dy = cur.y - _lastDragLocation.y;
+    _lastDragLocation = cur;
+    [_controller panByDeltaX:dx deltaY:dy];
+}
+
+- (void)scrollWheel:(NSEvent *)event {
+    CGFloat dy = event.scrollingDeltaY;
+    if (fabs(dy) < 1e-4) return;
+    CGFloat sensitivity = event.hasPreciseScrollingDeltas ? 0.008 : 0.06;
+    CGFloat factor = 1.0 - dy * sensitivity;
+    factor = fmax(0.80, fmin(1.25, factor));
+    [_controller zoomByFactor:factor];
+}
+
+- (void)magnifyWithEvent:(NSEvent *)event {
+    CGFloat factor = 1.0 - event.magnification;
+    factor = fmax(0.80, fmin(1.25, factor));
+    [_controller zoomByFactor:factor];
 }
 
 - (void)keyDown:(NSEvent *)event {
@@ -74,6 +138,7 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 @property (nonatomic, strong) CrystalModel *model;
 @property (nonatomic, strong) CrystalCompassNode *compassNode;
 @property (nonatomic, assign) double initialCameraDistance;
+@property (nonatomic, assign) double initialOrthoScale;
 
 @end
 
@@ -113,17 +178,17 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     self.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)];
     self.view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
-    // 1. Main SceneKit 3D View with Key handling
+    // 1. Main SceneKit 3D View with custom trackball rotation, pan, zoom & keyboard shortcuts
     _scnView = [[KeyHandlingSCNView alloc] initWithFrame:self.view.bounds];
     _scnView.controller = self;
     _scnView.delegate = self;
     _scnView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    _scnView.allowsCameraControl = YES;
+    _scnView.allowsCameraControl = NO;
     _scnView.autoenablesDefaultLighting = NO;
     _scnView.antialiasingMode = SCNAntialiasingModeMultisampling4X;
     [self.view addSubview:_scnView];
 
-    // 2. Independent Compass Overlay View (Fixed at Bottom-Left: 16, 16, 110x110)
+    // 2. Independent Compass Overlay View (Fixed at Bottom-Left: 16, 16, 115x115)
     _compassView = [[TransparentCompassView alloc] initWithFrame:NSMakeRect(16, 16, 115, 115)];
     _compassView.autoresizingMask = NSViewMaxXMargin | NSViewMaxYMargin;
     _compassView.backgroundColor = [NSColor clearColor];
@@ -253,19 +318,32 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 
     if (_model) {
         SCNNode *oldStructure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
-        SCNVector3 currentAngles = oldStructure ? oldStructure.eulerAngles : [self initialEulerAngles];
+        SCNNode *oldCam = [_scnView.scene.rootNode childNodeWithName:@"MainCameraNode" recursively:YES];
+        SCNMatrix4 currentTransform = oldStructure ? oldStructure.transform : [self initialTransform];
+        SCNVector3 camPos = oldCam ? oldCam.position : SCNVector3Make(0, 0, _initialCameraDistance);
+        double orthoScale = (oldCam && oldCam.camera) ? oldCam.camera.orthographicScale : _initialOrthoScale;
 
         double camDist = _initialCameraDistance;
         SCNScene *scene = [CrystalSceneBuilder buildSceneForModel:_model style:_currentStyle cameraDistance:&camDist];
         _scnView.scene = scene;
 
-        // Update compass model and style
-        [self updateCompassWithModel:_model];
-
-        SCNNode *newStructure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
-        if (newStructure) {
-            newStructure.eulerAngles = currentAngles;
+        SCNNode *newCam = [scene.rootNode childNodeWithName:@"MainCameraNode" recursively:YES];
+        if (newCam) {
+            newCam.position = camPos;
+            newCam.camera.orthographicScale = orthoScale;
+            _scnView.pointOfView = newCam;
         }
+
+        SCNNode *newStructure = [scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
+        if (newStructure) {
+            newStructure.transform = currentTransform;
+        }
+
+        // Update compass model and style while preserving orientation
+        [self updateCompassWithModel:_model];
+        [_compassNode syncWithTransform:currentTransform];
+        [_compassView setNeedsDisplay:YES];
+        [_scnView setNeedsDisplay:YES];
     }
 }
 
@@ -278,30 +356,34 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     _orientationMode = mode;
     [[NSUserDefaults standardUserDefaults] setInteger:mode forKey:kInitialOrientationModeKey];
     [self updateInfoText];
+    [self resetCamera];
 }
 
 - (void)setSpecifiedAxis:(SpecifiedDepthAxis)axis {
     _specifiedAxis = axis;
     [[NSUserDefaults standardUserDefaults] setInteger:axis forKey:kSpecifiedDepthAxisKey];
     [self updateInfoText];
+    if (_orientationMode == InitialOrientationModeSpecifiedAxis) {
+        [self resetCamera];
+    }
 }
 
-- (SCNVector3)initialEulerAngles {
+- (SCNMatrix4)initialTransform {
     if (!_model) {
-        return SCNVector3Make(-M_PI / 6.0, M_PI / 5.0, 0);
+        return SCNMatrix4Identity;
     }
 
     switch (_orientationMode) {
         case InitialOrientationModeLongestAxisDepth: {
             NSInteger longest = [_model longestAxisIndex];
-            return [_model eulerAnglesForDepthAxis:longest];
+            return [_model transformForDepthAxis:longest];
         }
         case InitialOrientationModeSpecifiedAxis: {
-            return [_model eulerAnglesForDepthAxis:(NSInteger)_specifiedAxis];
+            return [_model transformForDepthAxis:(NSInteger)_specifiedAxis];
         }
         case InitialOrientationModeClassicIsometric:
         default: {
-            return SCNVector3Make(-M_PI / 6.0, M_PI / 5.0, 0);
+            return [_model classicIsometricTransform];
         }
     }
 }
@@ -372,7 +454,14 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     double camDist = 10.0;
     SCNScene *scene = [CrystalSceneBuilder buildSceneForModel:model style:_currentStyle cameraDistance:&camDist];
     _initialCameraDistance = camDist;
+
+    SCNNode *camNode = [scene.rootNode childNodeWithName:@"MainCameraNode" recursively:YES];
+    _initialOrthoScale = (camNode && camNode.camera) ? camNode.camera.orthographicScale : 5.0;
+
     _scnView.scene = scene;
+    if (camNode) {
+        _scnView.pointOfView = camNode;
+    }
 
     // Update compass in independent overlay view
     [self updateCompassWithModel:model];
@@ -381,7 +470,15 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     _titleLabel.stringValue = [NSString stringWithFormat:@"%@  (%@)", [model formattedFormula], model.sourceFormat];
     [self updateInfoText];
 
-    [self resetCamera];
+    // Set initial orientation immediately without animation on first load
+    SCNNode *structure = [scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
+    SCNMatrix4 initMat = [self initialTransform];
+    if (structure) {
+        structure.transform = initMat;
+    }
+    [_compassNode syncWithTransform:initMat];
+    [_compassView setNeedsDisplay:YES];
+    [_scnView setNeedsDisplay:YES];
 }
 
 - (void)updateInfoText {
@@ -424,62 +521,109 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     _infoLabel.stringValue = info;
 }
 
-#pragma mark - SCNSceneRendererDelegate (Sync Pure Rotation to Compass)
+#pragma mark - Interactive Mouse Rotation, Pan, Zoom
+
+- (void)rotateByDeltaX:(CGFloat)dx deltaY:(CGFloat)dy {
+    SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
+    if (!structure) return;
+
+    CGFloat sensitivity = 0.0085;
+    SCNMatrix4 rotY = SCNMatrix4MakeRotation(dx * sensitivity, 0, 1, 0);
+    SCNMatrix4 rotX = SCNMatrix4MakeRotation(-dy * sensitivity, 1, 0, 0);
+    SCNMatrix4 screenRot = SCNMatrix4Mult(rotY, rotX);
+
+    // Apply screen-space rotation around the centered unit cell origin (0,0,0)
+    SCNMatrix4 newTransform = SCNMatrix4Mult(structure.transform, screenRot);
+    structure.transform = newTransform;
+
+    // Immediately sync compass rotation (translation is ignored)
+    [_compassNode syncWithTransform:newTransform];
+    [_compassView setNeedsDisplay:YES];
+    [_scnView setNeedsDisplay:YES];
+}
+
+- (void)panByDeltaX:(CGFloat)dx deltaY:(CGFloat)dy {
+    SCNNode *camNode = [_scnView.scene.rootNode childNodeWithName:@"MainCameraNode" recursively:YES];
+    if (!camNode || !camNode.camera) return;
+
+    CGFloat viewHeight = fmax(self.view.bounds.size.height, 100.0);
+    CGFloat unitsPerPixel = (camNode.camera.orthographicScale * 2.0) / viewHeight;
+
+    SCNVector3 pos = camNode.position;
+    pos.x -= dx * unitsPerPixel;
+    pos.y -= dy * unitsPerPixel;
+    camNode.position = pos;
+
+    // Note: Compass stays fixed and does NOT move on pan!
+    [_scnView setNeedsDisplay:YES];
+}
+
+- (void)zoomByFactor:(CGFloat)factor {
+    SCNNode *camNode = [_scnView.scene.rootNode childNodeWithName:@"MainCameraNode" recursively:YES];
+    if (!camNode || !camNode.camera) return;
+
+    double newScale = camNode.camera.orthographicScale * factor;
+    double minScale = 0.5;
+    double maxScale = fmax(_initialOrthoScale * 6.0, 30.0);
+    camNode.camera.orthographicScale = fmax(minScale, fmin(maxScale, newScale));
+    [_scnView setNeedsDisplay:YES];
+}
+
+#pragma mark - SCNSceneRendererDelegate (Sync Pure Rotation to Compass during Animations)
 
 - (void)renderer:(id<SCNSceneRenderer>)renderer updateAtTime:(NSTimeInterval)time {
     SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
-    SCNNode *camera = _scnView.pointOfView;
-
-    if (structure && camera && _compassNode) {
-        // Compute transform of structure relative to camera view
-        SCNMatrix4 rel = [camera.presentationNode convertTransform:SCNMatrix4Identity fromNode:structure.presentationNode];
-        // Apply strictly rotation to the compass node
-        [_compassNode syncWithTransform:rel];
+    if (structure && _compassNode) {
+        SCNMatrix4 liveTransform = structure.presentationNode ? structure.presentationNode.transform : structure.transform;
+        [_compassNode syncWithTransform:liveTransform];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self->_compassView setNeedsDisplay:YES];
+        });
     }
 }
 
-#pragma mark - View Orientations
+#pragma mark - View Orientations (Centered + Orthographic Straight-Line Alignment)
 
-- (void)resetCamera {
+- (void)applyTargetTransform:(SCNMatrix4)targetTransform resetZoom:(BOOL)resetZoom {
     SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
+    SCNNode *camNode = [_scnView.scene.rootNode childNodeWithName:@"MainCameraNode" recursively:YES];
     if (!structure) return;
 
-    SCNVector3 targetAngles = [self initialEulerAngles];
-
     [SCNTransaction begin];
-    [SCNTransaction setAnimationDuration:0.4];
-    structure.eulerAngles = targetAngles;
+    [SCNTransaction setAnimationDuration:0.35];
+    structure.transform = targetTransform;
+    if (camNode) {
+        // Re-center the unit cell in the viewport
+        camNode.position = SCNVector3Make(0, 0, _initialCameraDistance);
+        if (resetZoom && camNode.camera) {
+            camNode.camera.orthographicScale = _initialOrthoScale;
+        }
+    }
+    [_compassNode syncWithTransform:targetTransform];
     [SCNTransaction commit];
+
+    [_scnView setNeedsDisplay:YES];
+    [_compassView setNeedsDisplay:YES];
+}
+
+- (void)resetCamera {
+    if (!_model) return;
+    [self applyTargetTransform:[self initialTransform] resetZoom:YES];
 }
 
 - (void)lookAlongA {
-    SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
-    if (!structure) return;
-
-    [SCNTransaction begin];
-    [SCNTransaction setAnimationDuration:0.4];
-    structure.eulerAngles = SCNVector3Make(0, -M_PI / 2.0, 0);
-    [SCNTransaction commit];
+    if (!_model) return;
+    [self applyTargetTransform:[_model transformForDepthAxis:0] resetZoom:NO];
 }
 
 - (void)lookAlongB {
-    SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
-    if (!structure) return;
-
-    [SCNTransaction begin];
-    [SCNTransaction setAnimationDuration:0.4];
-    structure.eulerAngles = SCNVector3Make(M_PI / 2.0, 0, 0);
-    [SCNTransaction commit];
+    if (!_model) return;
+    [self applyTargetTransform:[_model transformForDepthAxis:1] resetZoom:NO];
 }
 
 - (void)lookAlongC {
-    SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
-    if (!structure) return;
-
-    [SCNTransaction begin];
-    [SCNTransaction setAnimationDuration:0.4];
-    structure.eulerAngles = SCNVector3Make(0, 0, 0);
-    [SCNTransaction commit];
+    if (!_model) return;
+    [self applyTargetTransform:[_model transformForDepthAxis:2] resetZoom:NO];
 }
 
 @end

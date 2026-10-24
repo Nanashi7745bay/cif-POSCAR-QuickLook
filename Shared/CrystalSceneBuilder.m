@@ -108,13 +108,18 @@
 
     SCNNode *rootNode = scene.rootNode;
 
-    // Structure node (centered)
+    // Structure node (at origin so rotations pivot strictly around the unit cell center)
     SCNNode *structureNode = [SCNNode node];
     structureNode.name = @"StructureNode";
+    structureNode.position = SCNVector3Make(0, 0, 0);
     [rootNode addChildNode:structureNode];
 
+    // Child content node offset by -center so the unit cell center lies at StructureNode's origin (0,0,0)
     Vector3D center = [model unitCellCenter];
-    structureNode.position = SCNVector3Make(-center.x, -center.y, -center.z);
+    SCNNode *contentNode = [SCNNode node];
+    contentNode.name = @"ContentNode";
+    contentNode.position = SCNVector3Make(-center.x, -center.y, -center.z);
+    [structureNode addChildNode:contentNode];
 
     // 1. Build Unit Cell Wireframe & Axes
     Vector3D o = Vector3DMake(0, 0, 0);
@@ -131,30 +136,30 @@
 
     // Cell Axes: a=Red, b=Green, c=Blue
     CGFloat axisRadius = isFlat ? 0.035 : 0.045;
-    [structureNode addChildNode:[self cylinderFromPoint:P3(o) toPoint:P3(a) radius:axisRadius
-                                                  color:[NSColor colorWithSRGBRed:1.0 green:0.23 blue:0.19 alpha:1.0]
-                                          lightingModel:lightingModel]];
-    [structureNode addChildNode:[self cylinderFromPoint:P3(o) toPoint:P3(b) radius:axisRadius
-                                                  color:[NSColor colorWithSRGBRed:0.20 green:0.78 blue:0.35 alpha:1.0]
-                                          lightingModel:lightingModel]];
-    [structureNode addChildNode:[self cylinderFromPoint:P3(o) toPoint:P3(c) radius:axisRadius
-                                                  color:[NSColor colorWithSRGBRed:0.0 green:0.48 blue:1.0 alpha:1.0]
-                                          lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(o) toPoint:P3(a) radius:axisRadius
+                                                color:[NSColor colorWithSRGBRed:1.0 green:0.23 blue:0.19 alpha:1.0]
+                                        lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(o) toPoint:P3(b) radius:axisRadius
+                                                color:[NSColor colorWithSRGBRed:0.20 green:0.78 blue:0.35 alpha:1.0]
+                                        lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(o) toPoint:P3(c) radius:axisRadius
+                                                color:[NSColor colorWithSRGBRed:0.0 green:0.48 blue:1.0 alpha:1.0]
+                                        lightingModel:lightingModel]];
 
     // Remaining 9 cell edges
     CGFloat edgeRadius = isFlat ? 0.020 : 0.022;
-    [structureNode addChildNode:[self cylinderFromPoint:P3(a) toPoint:P3(ab) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
-    [structureNode addChildNode:[self cylinderFromPoint:P3(a) toPoint:P3(ac) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(a) toPoint:P3(ab) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(a) toPoint:P3(ac) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
 
-    [structureNode addChildNode:[self cylinderFromPoint:P3(b) toPoint:P3(ab) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
-    [structureNode addChildNode:[self cylinderFromPoint:P3(b) toPoint:P3(bc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(b) toPoint:P3(ab) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(b) toPoint:P3(bc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
 
-    [structureNode addChildNode:[self cylinderFromPoint:P3(c) toPoint:P3(ac) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
-    [structureNode addChildNode:[self cylinderFromPoint:P3(c) toPoint:P3(bc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(c) toPoint:P3(ac) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(c) toPoint:P3(bc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
 
-    [structureNode addChildNode:[self cylinderFromPoint:P3(ab) toPoint:P3(abc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
-    [structureNode addChildNode:[self cylinderFromPoint:P3(ac) toPoint:P3(abc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
-    [structureNode addChildNode:[self cylinderFromPoint:P3(bc) toPoint:P3(abc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(ab) toPoint:P3(abc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(ac) toPoint:P3(abc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
+    [contentNode addChildNode:[self cylinderFromPoint:P3(bc) toPoint:P3(abc) radius:edgeRadius color:cellEdgeColor lightingModel:lightingModel]];
 
     // 2. Build Atoms
     NSMutableDictionary<NSString *, SCNMaterial *> *materialCache = [NSMutableDictionary dictionary];
@@ -194,7 +199,7 @@
         if (atom.isPeriodicReplica) {
             atomNode.opacity = (style == CrystalRenderStyleFlat) ? 0.95 : 0.88;
         }
-        [structureNode addChildNode:atomNode];
+        [contentNode addChildNode:atomNode];
     }
 
     // 3. Build Bonds
@@ -202,7 +207,7 @@
     for (CrystalBond *bond in model.bonds) {
         SCNVector3 p1 = P3(bond.atom1.cartesianCoord);
         SCNVector3 p2 = P3(bond.atom2.cartesianCoord);
-        [structureNode addChildNode:[self cylinderFromPoint:p1 toPoint:p2 radius:bRadius color:bondColor lightingModel:lightingModel]];
+        [contentNode addChildNode:[self cylinderFromPoint:p1 toPoint:p2 radius:bRadius color:bondColor lightingModel:lightingModel]];
     }
 
     #undef P3
@@ -269,15 +274,17 @@
         }
     }
 
-    // 5. Camera Setup
+    // 5. Camera Setup (Orthographic projection so parallel lattice axes & atomic columns align straight)
     double maxDim = fmax(model.a, fmax(model.b, model.c));
     if (maxDim < 2.0) maxDim = 5.0;
-    double camDist = maxDim * 2.5;
+    double camDist = maxDim * 4.0;
+    double orthoScale = fmax(maxDim * 0.95, 2.5);
 
     SCNCamera *camera = [SCNCamera camera];
+    camera.usesOrthographicProjection = YES;
+    camera.orthographicScale = orthoScale;
     camera.zNear = 0.1;
     camera.zFar = camDist * 10.0;
-    camera.fieldOfView = 42.0;
 
     SCNNode *cameraNode = [SCNNode node];
     cameraNode.name = @"MainCameraNode";
