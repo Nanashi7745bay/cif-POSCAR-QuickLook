@@ -38,24 +38,26 @@
     [self buildCompassWithModel:model style:style];
 }
 
-- (void)syncRotationWithStructureEulerAngles:(SCNVector3)eulerAngles {
-    _rotatorNode.eulerAngles = eulerAngles;
+- (void)syncWithTransform:(SCNMatrix4)transform {
+    // Isolate pure rotation: remove translation component
+    transform.m41 = 0;
+    transform.m42 = 0;
+    transform.m43 = 0;
+    _rotatorNode.transform = transform;
 }
 
-// Helper to create an arrow along unit direction vector u
-static SCNNode *createArrow(Vector3D u, CGFloat shaftLen, CGFloat headLen, CGFloat shaftRadius, CGFloat headRadius, NSColor *color, NSString *labelString, NSString *lightingModel) {
+static SCNNode *createCompassArrow(Vector3D u, CGFloat shaftLen, CGFloat headLen, CGFloat shaftRadius, CGFloat headRadius, NSColor *color, NSString *labelString, NSString *lightingModel) {
     SCNNode *arrowNode = [SCNNode node];
-
-    CGFloat totalLen = shaftLen + headLen;
 
     // 1. Shaft (Cylinder)
     SCNCylinder *shaft = [SCNCylinder cylinderWithRadius:shaftRadius height:shaftLen];
-    shaft.radialSegmentCount = 12;
+    shaft.radialSegmentCount = 16;
     SCNMaterial *mat = [SCNMaterial material];
     mat.diffuse.contents = color;
     mat.lightingModelName = lightingModel;
     if (![lightingModel isEqualToString:SCNLightingModelConstant]) {
-        mat.specular.contents = [NSColor colorWithWhite:0.7 alpha:1.0];
+        mat.specular.contents = [NSColor colorWithWhite:0.8 alpha:1.0];
+        mat.shininess = 0.3;
     }
     shaft.firstMaterial = mat;
 
@@ -64,15 +66,15 @@ static SCNNode *createArrow(Vector3D u, CGFloat shaftLen, CGFloat headLen, CGFlo
 
     // 2. Head (Cone)
     SCNCone *head = [SCNCone coneWithTopRadius:0.0 bottomRadius:headRadius height:headLen];
-    head.radialSegmentCount = 12;
+    head.radialSegmentCount = 16;
     head.firstMaterial = mat;
 
     SCNNode *headNode = [SCNNode nodeWithGeometry:head];
     headNode.position = SCNVector3Make(0, shaftLen + headLen * 0.5, 0);
 
     // 3. Label (a, b, c)
-    SCNText *textGeom = [SCNText textWithString:labelString extrusionDepth:0.015];
-    textGeom.font = [NSFont boldSystemFontOfSize:0.12];
+    SCNText *textGeom = [SCNText textWithString:labelString extrusionDepth:0.02];
+    textGeom.font = [NSFont boldSystemFontOfSize:0.13];
     textGeom.flatness = 0.05;
 
     SCNMaterial *textMat = [SCNMaterial material];
@@ -81,11 +83,10 @@ static SCNNode *createArrow(Vector3D u, CGFloat shaftLen, CGFloat headLen, CGFlo
     textGeom.firstMaterial = textMat;
 
     SCNNode *textNode = [SCNNode nodeWithGeometry:textGeom];
-    // Center the text
     SCNVector3 minV, maxV;
     [textNode getBoundingBoxMin:&minV max:&maxV];
     textNode.pivot = SCNMatrix4MakeTranslation((maxV.x - minV.x) * 0.5, (maxV.y - minV.y) * 0.5, 0);
-    textNode.position = SCNVector3Make(0, totalLen + 0.08, 0);
+    textNode.position = SCNVector3Make(0, shaftLen + headLen + 0.07, 0);
 
     // Billboard constraint so text always faces camera
     SCNBillboardConstraint *billboard = [SCNBillboardConstraint billboardConstraint];
@@ -106,7 +107,6 @@ static SCNNode *createArrow(Vector3D u, CGFloat shaftLen, CGFloat headLen, CGFlo
     CGFloat uy = u.y / len;
     CGFloat uz = u.z / len;
 
-    // Cross product: (0, 1, 0) x (ux, uy, uz) = (uz, 0, -ux)
     CGFloat rx = uz;
     CGFloat ry = 0.0;
     CGFloat rz = -ux;
@@ -130,9 +130,9 @@ static SCNNode *createArrow(Vector3D u, CGFloat shaftLen, CGFloat headLen, CGFlo
 
     // Central small sphere
     SCNSphere *centerSphere = [SCNSphere sphereWithRadius:0.035];
-    centerSphere.segmentCount = 12;
+    centerSphere.segmentCount = 16;
     SCNMaterial *sphereMat = [SCNMaterial material];
-    sphereMat.diffuse.contents = [NSColor colorWithWhite:0.6 alpha:1.0];
+    sphereMat.diffuse.contents = (style == CrystalRenderStyleFlat) ? [NSColor colorWithWhite:0.3 alpha:1.0] : [NSColor colorWithWhite:0.65 alpha:1.0];
     sphereMat.lightingModelName = lightingModel;
     centerSphere.firstMaterial = sphereMat;
 
@@ -153,19 +153,19 @@ static SCNNode *createArrow(Vector3D u, CGFloat shaftLen, CGFloat headLen, CGFlo
     Vector3D uc = (lc > 1e-6) ? Vector3DScale(vc, 1.0 / lc) : Vector3DMake(0, 0, 1);
 
     // Dimensions
-    CGFloat shaftLen = 0.32;
-    CGFloat headLen = 0.10;
+    CGFloat shaftLen = 0.30;
+    CGFloat headLen = 0.09;
     CGFloat shaftRadius = 0.016;
-    CGFloat headRadius = 0.042;
+    CGFloat headRadius = 0.040;
 
     // Colors: a=Red, b=Green, c=Blue
     NSColor *colA = [NSColor colorWithSRGBRed:1.0 green:0.23 blue:0.19 alpha:1.0];
     NSColor *colB = [NSColor colorWithSRGBRed:0.20 green:0.78 blue:0.35 alpha:1.0];
     NSColor *colC = [NSColor colorWithSRGBRed:0.0 green:0.48 blue:1.0 alpha:1.0];
 
-    SCNNode *arrowA = createArrow(ua, shaftLen, headLen, shaftRadius, headRadius, colA, @"a", lightingModel);
-    SCNNode *arrowB = createArrow(ub, shaftLen, headLen, shaftRadius, headRadius, colB, @"b", lightingModel);
-    SCNNode *arrowC = createArrow(uc, shaftLen, headLen, shaftRadius, headRadius, colC, @"c", lightingModel);
+    SCNNode *arrowA = createCompassArrow(ua, shaftLen, headLen, shaftRadius, headRadius, colA, @"a", lightingModel);
+    SCNNode *arrowB = createCompassArrow(ub, shaftLen, headLen, shaftRadius, headRadius, colB, @"b", lightingModel);
+    SCNNode *arrowC = createCompassArrow(uc, shaftLen, headLen, shaftRadius, headRadius, colC, @"c", lightingModel);
 
     [_rotatorNode addChildNode:arrowA];
     [_rotatorNode addChildNode:arrowB];

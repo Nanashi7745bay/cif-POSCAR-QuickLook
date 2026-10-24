@@ -13,7 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (instancetype)compassWithModel:(CrystalModel *)model style:(CrystalRenderStyle)style;
 - (void)updateWithModel:(CrystalModel *)model style:(CrystalRenderStyle)style;
-- (void)syncRotationWithStructureEulerAngles:(SCNVector3)eulerAngles;
+- (void)syncWithTransform:(SCNMatrix4)transform;
 
 @end
 

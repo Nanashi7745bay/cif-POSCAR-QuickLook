@@ -12,6 +12,16 @@ NSString * const kInitialOrientationModeKey = @"CrystalInitialOrientationMode";
 NSString * const kSpecifiedDepthAxisKey = @"CrystalSpecifiedDepthAxis";
 static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 
+// Transparent overlay view that forwards all mouse events to views underneath
+@interface TransparentCompassView : SCNView
+@end
+
+@implementation TransparentCompassView
+- (NSView *)hitTest:(NSPoint)point {
+    return nil; // Pass-through all clicks/drags to main view
+}
+@end
+
 @interface KeyHandlingSCNView : SCNView
 @property (nonatomic, weak) CrystalViewController *controller;
 @end
@@ -55,6 +65,7 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
 @interface CrystalViewController ()
 
 @property (nonatomic, strong) KeyHandlingSCNView *scnView;
+@property (nonatomic, strong) TransparentCompassView *compassView;
 @property (nonatomic, strong) NSVisualEffectView *hudView;
 @property (nonatomic, strong) NSTextField *titleLabel;
 @property (nonatomic, strong) NSTextField *infoLabel;
@@ -102,7 +113,7 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     self.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)];
     self.view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
-    // 1. SceneKit 3D View with Key handling
+    // 1. Main SceneKit 3D View with Key handling
     _scnView = [[KeyHandlingSCNView alloc] initWithFrame:self.view.bounds];
     _scnView.controller = self;
     _scnView.delegate = self;
@@ -112,7 +123,16 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     _scnView.antialiasingMode = SCNAntialiasingModeMultisampling4X;
     [self.view addSubview:_scnView];
 
-    // 2. Translucent Glass HUD Card (Top Left)
+    // 2. Independent Compass Overlay View (Fixed at Bottom-Left: 16, 16, 110x110)
+    _compassView = [[TransparentCompassView alloc] initWithFrame:NSMakeRect(16, 16, 115, 115)];
+    _compassView.autoresizingMask = NSViewMaxXMargin | NSViewMaxYMargin;
+    _compassView.backgroundColor = [NSColor clearColor];
+    _compassView.autoenablesDefaultLighting = NO;
+    _compassView.antialiasingMode = SCNAntialiasingModeMultisampling4X;
+    [self.view addSubview:_compassView];
+    [self setupCompassScene];
+
+    // 3. Translucent Glass HUD Card (Top Left)
     _hudView = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(16, self.view.bounds.size.height - 246, 290, 230)];
     _hudView.autoresizingMask = NSViewMaxXMargin | NSViewMinYMargin;
     _hudView.state = NSVisualEffectStateActive;
@@ -170,6 +190,42 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     [self updateHUDTheme];
 }
 
+- (void)setupCompassScene {
+    SCNScene *cScene = [SCNScene scene];
+
+    // Orthographic Camera (No perspective distortion, constant size)
+    SCNCamera *camera = [SCNCamera camera];
+    camera.usesOrthographicProjection = YES;
+    camera.orthographicScale = 1.05;
+    camera.zNear = 0.1;
+    camera.zFar = 20.0;
+
+    SCNNode *cCamNode = [SCNNode node];
+    cCamNode.camera = camera;
+    cCamNode.position = SCNVector3Make(0, 0, 5);
+    [cScene.rootNode addChildNode:cCamNode];
+
+    // Key light for compass
+    SCNLight *light = [SCNLight light];
+    light.type = SCNLightTypeDirectional;
+    light.color = [NSColor colorWithWhite:0.95 alpha:1.0];
+    SCNNode *lNode = [SCNNode node];
+    lNode.light = light;
+    lNode.eulerAngles = SCNVector3Make(-M_PI / 4.0, M_PI / 4.0, 0);
+    [cScene.rootNode addChildNode:lNode];
+
+    // Ambient light
+    SCNLight *amb = [SCNLight light];
+    amb.type = SCNLightTypeAmbient;
+    amb.color = [NSColor colorWithWhite:0.4 alpha:1.0];
+    SCNNode *ambNode = [SCNNode node];
+    ambNode.light = amb;
+    [cScene.rootNode addChildNode:ambNode];
+
+    _compassView.scene = cScene;
+    _compassView.pointOfView = cCamNode;
+}
+
 - (void)updateHUDTheme {
     if (_currentStyle == CrystalRenderStyleFlat) {
         _hudView.material = NSVisualEffectMaterialSheet;
@@ -203,7 +259,8 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
         SCNScene *scene = [CrystalSceneBuilder buildSceneForModel:_model style:_currentStyle cameraDistance:&camDist];
         _scnView.scene = scene;
 
-        [self attachCompassToScene:scene];
+        // Update compass model and style
+        [self updateCompassWithModel:_model];
 
         SCNNode *newStructure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
         if (newStructure) {
@@ -249,27 +306,15 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     }
 }
 
-- (void)attachCompassToScene:(SCNScene *)scene {
-    if (!_model) return;
+- (void)updateCompassWithModel:(CrystalModel *)model {
+    if (!_compassView.scene) return;
 
-    SCNNode *cameraNode = [scene.rootNode childNodeWithName:@"MainCameraNode" recursively:YES];
-    if (!cameraNode) return;
-
-    _compassNode = [CrystalCompassNode compassWithModel:_model style:_currentStyle];
-    _compassNode.name = @"OrientationCompassNode";
-
-    // Place compass in front-left of camera
-    // Distance from camera: 2.0
-    // At FOV ~ 42 deg, half-height is 2.0 * tan(21 deg) ~= 0.768
-    // With 4:3 aspect ratio, half-width ~= 1.02
-    CGFloat compDist = 2.0;
-    CGFloat fovRad = 42.0 * M_PI / 180.0;
-    CGFloat halfH = compDist * tan(fovRad * 0.5);
-    CGFloat aspect = (self.view.bounds.size.height > 0) ? (self.view.bounds.size.width / self.view.bounds.size.height) : (4.0 / 3.0);
-    CGFloat halfW = halfH * aspect;
-
-    _compassNode.position = SCNVector3Make(-halfW + 0.35, -halfH + 0.35, -compDist);
-    [cameraNode addChildNode:_compassNode];
+    if (_compassNode) {
+        [_compassNode removeFromParentNode];
+    }
+    _compassNode = [CrystalCompassNode compassWithModel:model style:_currentStyle];
+    _compassNode.position = SCNVector3Make(0, 0, 0); // Always at origin in compass scene
+    [_compassView.scene.rootNode addChildNode:_compassNode];
 }
 
 - (BOOL)loadStructureFromURL:(NSURL *)url error:(NSError * _Nullable *)error {
@@ -329,7 +374,8 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     _initialCameraDistance = camDist;
     _scnView.scene = scene;
 
-    [self attachCompassToScene:scene];
+    // Update compass in independent overlay view
+    [self updateCompassWithModel:model];
 
     // Update HUD
     _titleLabel.stringValue = [NSString stringWithFormat:@"%@  (%@)", [model formattedFormula], model.sourceFormat];
@@ -349,7 +395,6 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     [info appendFormat:@"α=%.1f° β=%.1f° γ=%.1f°\n", _model.alpha, _model.beta, _model.gamma];
     [info appendFormat:@"Vol: %.2f Å³\n", _model.volume];
 
-    // Depth orientation info
     NSString *depthStr = @"";
     if (_orientationMode == InitialOrientationModeLongestAxisDepth) {
         depthStr = [NSString stringWithFormat:@"Depth: Longest (%@-axis)", [_model longestAxisName]];
@@ -361,7 +406,6 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     }
     [info appendFormat:@"%@\n", depthStr];
 
-    // Atoms summary
     NSMutableDictionary<NSString *, NSNumber *> *elemCounts = [NSMutableDictionary dictionary];
     NSUInteger totalBase = 0;
     for (CrystalAtom *a in _model.atoms) {
@@ -380,13 +424,17 @@ static NSString * const kSavedRenderStyleKey = @"CrystalQuickLookRenderStyle";
     _infoLabel.stringValue = info;
 }
 
-#pragma mark - SCNSceneRendererDelegate (Sync Compass Rotation)
+#pragma mark - SCNSceneRendererDelegate (Sync Pure Rotation to Compass)
 
 - (void)renderer:(id<SCNSceneRenderer>)renderer updateAtTime:(NSTimeInterval)time {
     SCNNode *structure = [_scnView.scene.rootNode childNodeWithName:@"StructureNode" recursively:YES];
-    if (structure && _compassNode) {
-        SCNVector3 angles = structure.presentationNode.eulerAngles;
-        [_compassNode syncRotationWithStructureEulerAngles:angles];
+    SCNNode *camera = _scnView.pointOfView;
+
+    if (structure && camera && _compassNode) {
+        // Compute transform of structure relative to camera view
+        SCNMatrix4 rel = [camera.presentationNode convertTransform:SCNMatrix4Identity fromNode:structure.presentationNode];
+        // Apply strictly rotation to the compass node
+        [_compassNode syncWithTransform:rel];
     }
 }
 

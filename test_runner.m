@@ -46,7 +46,7 @@ static void runTests(NSString *name, NSURL *url, BOOL isCIF, double expectedA, N
         printf("FAILED (Compass node creation failed)\n");
         exit(1);
     }
-    [compass syncRotationWithStructureEulerAngles:SCNVector3Make(0.1, 0.2, 0.3)];
+    [compass syncWithTransform:SCNMatrix4MakeRotation(0.5, 1, 0, 0)];
 
     // Verify longest axis index
     NSInteger longest = [model longestAxisIndex];
